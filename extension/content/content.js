@@ -89,11 +89,11 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
 }
 
 
-  function highlightElement(uniqueId, inputText) {
+function highlightElement(uniqueId, inputText) {
     const element = document.querySelector(`[data-highlight-id='${uniqueId}']`);
     if (element) {
-      element.style.border = '2px solid green';
-  
+        // can use id to find and click on elements instead of text matching
+
       // Check if the element is an input and part of a form
       if (element.tagName.toLowerCase() === 'input') {
         element.value = inputText; // Set the input text
@@ -115,13 +115,39 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
           });
           element.dispatchEvent(event);
         }
-      } else {
-        // If it's not an input, just click the element
-        element.click();
       }
     }
   }
   
+
+  function findAllElementsWithText(textToFind) {
+    let xpath = `//*[text()='${textToFind}']`;
+    let matchingElements = [];
+    let results = document.evaluate(xpath, document, null, XPathResult.ANY_TYPE, null);
+    let currentElement = results.iterateNext();
+    
+    while (currentElement) {
+      // Store the outerHTML of each matching element
+      matchingElements.push(currentElement.outerHTML);
+      
+      // Highlight the element by adding a red border
+      currentElement.style.border = '2px solid red';
+      currentElement.style.boxSizing = 'border-box'; // Ensure border is within element's dimensions
+  
+      // Trigger a click event on the element
+      currentElement.click();
+  
+      currentElement = results.iterateNext();
+    }
+    
+    if (matchingElements.length > 0) {
+      return matchingElements;
+    } else {
+      return ['Element not found'];
+    }
+  }
+
+
   
   async function processChatbotResponse(response) {
     const theElementInteraction = response.the_element_interaction[0];
@@ -179,6 +205,16 @@ function createChatBox() {
     chatboxInputContainer.appendChild(chatboxInput);
     chatboxContainer.appendChild(chatboxInputContainer);
 
+    // Load and display chat history
+    const chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
+    chatHistory.forEach(msg => {
+        const messageDiv = document.createElement('div');
+        messageDiv.style.textAlign = msg.sender === 'user' ? 'right' : 'left';
+        messageDiv.innerHTML = `<div style="display: inline-block; background-color: ${msg.sender === 'user' ? '#007bff' : '#f1f1f1'}; color: ${msg.sender === 'user' ? '#ffffff' : '#333'}; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${msg.text}</div>`;
+        chatboxMessages.appendChild(messageDiv);
+    });
+
+
     chatboxInput.addEventListener('keypress', async function(e) {
         if (e.key === 'Enter' && chatboxInput.value.trim() !== '') {
             const userMessage = document.createElement('div');
@@ -187,17 +223,24 @@ function createChatBox() {
             chatboxMessages.appendChild(userMessage);
             chatboxMessages.scrollTop = chatboxMessages.scrollHeight;
 
+            // Save user message to localStorage
+            const newChatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
+            newChatHistory.push({ text: chatboxInput.value, sender: 'user' });
+            localStorage.setItem('chatHistory', JSON.stringify(newChatHistory));
+
             const response = await sendChatMessage(chatboxInput.value);
             const output_response = response.output;
 
             const action_element = JSON.parse(output_response);
             processChatbotResponse(action_element)
-            const elementToInteract = taskDetails.the_element_interaction[0].element_of_this_step;
-            // findAllElementsWithText(elementToInteract);
+            const elementToInteract = action_element.the_element_interaction[0].element_of_this_step;
+            if (elementToInteract !== '') {
+                findAllElementsWithText(elementToInteract);
+            }
 
             const responseMessage = document.createElement('div');
             responseMessage.style.textAlign = 'left';
-            responseMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${elementToInteract}</div>`;
+            responseMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${action_element.the_element_interaction[0].reason}</div>`;
 
             chatboxMessages.appendChild(responseMessage);
             chatboxMessages.scrollTop = chatboxMessages.scrollHeight;
@@ -207,18 +250,25 @@ function createChatBox() {
         }
     });
 
+    // Bottom Button Container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style = 'display: flex;';
+
+    // Restart Button
+    const restartBtn = document.createElement('button');
+    restartBtn.innerText = 'Restart';
+    restartBtn.style = 'flex: 1; padding: 10px; border: none; background-color: #0056b3; color: white; border-bottom-left-radius: 8px; cursor: pointer;';
+    restartBtn.addEventListener('click', function() {
+        localStorage.removeItem('chatHistory');
+        while (chatboxMessages.firstChild) {
+            chatboxMessages.removeChild(chatboxMessages.firstChild);
+        }
+    });
 
     // Pause/Continue Button
     const pauseContinueBtn = document.createElement('button');
-    pauseContinueBtn.innerText = 'Pause'; // Initial text
-    pauseContinueBtn.style.padding = '10px';
-    pauseContinueBtn.style.width = '100%';
-    pauseContinueBtn.style.border = 'none';
-    pauseContinueBtn.style.backgroundColor = '#007bff';
-    pauseContinueBtn.style.color = 'white';
-    pauseContinueBtn.style.borderBottomLeftRadius = '8px';
-    pauseContinueBtn.style.borderBottomRightRadius = '8px';
-
+    pauseContinueBtn.innerText = 'Pause';
+    pauseContinueBtn.style = 'flex: 1; padding: 10px; border: none; background-color: #FF0044; color: white; border-bottom-right-radius: 8px; cursor: pointer;';
     pauseContinueBtn.addEventListener('click', function() {
         const chatboxInput = document.getElementById('chatbox-input'); // Ensure this ID is set for the chatbox input element
         if (pauseContinueBtn.innerText === 'Pause') {
@@ -229,12 +279,17 @@ function createChatBox() {
             pauseContinueBtn.innerText = 'Pause';
         }
     });
+    
 
-    // Add the pause/continue button to the container
-    chatboxContainer.appendChild(pauseContinueBtn);
+    // Add buttons to the button container
+    buttonContainer.appendChild(restartBtn);
+    buttonContainer.appendChild(pauseContinueBtn);
+
+    // Append the button container to the chatboxContainer
+    chatboxContainer.appendChild(buttonContainer);
+
     document.body.appendChild(chatboxContainer);
 }
 
 // Call createChatBox to display the chatbox when the extension is loaded
 createChatBox();
-
