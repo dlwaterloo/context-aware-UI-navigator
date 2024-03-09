@@ -1,74 +1,71 @@
-// Webpage element scraper code
-function findAllVisibleElementsAndDisplay() {
-    const resultsElement = document.getElementById('results');
-    resultsElement.innerHTML = ''; // Clear previous results
-
-    const groupedElements = findAllVisibleElements();
-    // Convert groupedElements to JSON and display
-    const json = JSON.stringify(groupedElements, null, 2);
-    const pre = document.createElement('pre');
-    pre.style.overflow = 'auto';
-    pre.textContent = json;
-    resultsElement.appendChild(pre);
-}
+let isAutomationPaused = false; // This flag controls the automation
+let originalMessageText = ''; // Stores the original message text for automation
 
 
 function findAllVisibleElements() {
+    // Step 1: Reset previously set data-group-id attributes to ensure a clean state
+    document.querySelectorAll('[data-group-id]').forEach(element => {
+        element.removeAttribute('data-group-id');
+    });
+
     let allElements = document.querySelectorAll('body *');
     let visibleElementsInfo = [];
     let groups = new Map();
+    let uniqueGroupIdCounter = 0; // For generating unique group IDs
 
     allElements.forEach(element => {
-      if (element.offsetWidth > 0 && element.offsetHeight > 0) {
-        let hasVisibleChild = Array.from(element.children).some(child => child.offsetWidth > 0 && child.offsetHeight > 0);
+        if (element.offsetWidth > 0 && element.offsetHeight > 0) {
+            let hasVisibleChild = Array.from(element.children).some(child => child.offsetWidth > 0 && child.offsetHeight > 0);
 
-        if (!hasVisibleChild && element.innerText.trim().length > 0 || element.tagName.toLowerCase() === 'input') {
-          let isClickable = ['a', 'button'].includes(element.tagName.toLowerCase()) || element.getAttribute('role') === 'button';
-          let isInput = element.tagName.toLowerCase() === 'input';
-          const elementType = isInput ? 'input' : isClickable ? 'clickable' : '';
-          const elementText = element.innerText.trim().length > 0 ? element.innerText.trim() : element.value;
-          const elementId = element.id || ''; // Capture the element's ID attribute
+            if (!hasVisibleChild && element.innerText.trim().length > 0 || element.tagName.toLowerCase() === 'input') {
+                let isClickable = ['a', 'button'].includes(element.tagName.toLowerCase()) || element.getAttribute('role') === 'button';
+                let isInput = element.tagName.toLowerCase() === 'input';
+                const elementType = isInput ? 'input' : isClickable ? 'clickable' : '';
+                const elementText = element.innerText.trim().length > 0 ? element.innerText.trim() : element.value;
+                const elementId = element.id || ''; 
 
-          // Determine a suitable group based on the element's ancestors
-          let ancestor = element;
-          for (let i = 0; i < 8; i++) {
-            if (ancestor.parentElement) {
-              ancestor = ancestor.parentElement;
-            } else {
-              break;
+                // Determine a suitable group based on the element's ancestors
+                let ancestor = element;
+                for (let i = 0; i < 8; i++) {
+                    if (ancestor.parentElement) {
+                        ancestor = ancestor.parentElement;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Use the highest-level ancestor as the group element
+                let groupElement = ancestor;
+                let groupId = groupElement.getAttribute('data-group-id');
+                if (!groupId) {
+                    // Ensure unique groupId for each grouping
+                    groupId = `group-${uniqueGroupIdCounter++}`;
+                    groupElement.setAttribute('data-group-id', groupId);
+                    if (!groups.has(groupId)) {
+                        groups.set(groupId, []);
+                    }
+                }
+                groups.get(groupId).push({ element: elementText, id: elementId, type: element.tagName.toLowerCase() });
             }
-          }
-
-          // Use the highest-level ancestor as the group element
-          let groupElement = ancestor;
-          let groupId = groupElement.getAttribute('data-group-id');
-          if (!groupId) {
-            groupId = 'group'; // Simplify groupId since it will not be included in the output
-            groupElement.setAttribute('data-group-id', groupId);
-            if (!groups.has(groupId)) {
-              groups.set(groupId, []);
-            }
-          }
-          groups.get(groupId).push({ element: elementText, id: elementId, type: element.tagName.toLowerCase() }); // Include elementId in the output
         }
-      }
     });
 
     // Convert groups to an array without group IDs for JSON serialization
     let groupedElements = [];
     groups.forEach((elements) => {
-      groupedElements.push({ elements }); // Omitting groupId in the output
+        groupedElements.push({ elements }); // Omitting groupId in the output
     });
 
     return groupedElements;
-  }
+}
+
 
 
 // Chatbot code modifications
-async function sendChatMessage(messageText) {
+async function sendChatMessage(messageText, elementsResultString) {
     // Trigger allElementsButton functionality before sending the chat message
-    const elementsResult = findAllVisibleElements(); // Get all visible elements
-    const elementsResultString = JSON.stringify(elementsResult); // Convert elements result to string for appending
+    // const elementsResult = findAllVisibleElements(); // Get all visible elements
+    // const elementsResultString = JSON.stringify(elementsResult); // Convert elements result to string for appending
     const instruction = `You are a UI navigator. Given a {task} and the current {webpage_elements}, your job is to provide the one element that needs to be interacted with. Analyze the task and webpage elements carefully. If the interaction involves an input field, specify the text to be entered; otherwise, leave the ‘input_text’ field empty. 
 Respond in the following JSON format:
 \`\`\`{{"the_element_interaction": [
@@ -77,6 +74,7 @@ Respond in the following JSON format:
 Ensure the response is valid JSON in the action_input. You must respond in such a format for all our conversation and my next input will only be {webpage_elements}.`;
     const combinedMessage = instruction + "task: " + messageText + "webpage_elements:" + elementsResultString; // Append elements result to user's input
 
+    // const combinedMessage = messageText;
     const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: {
@@ -85,7 +83,52 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
         },
         body: JSON.stringify({ text: combinedMessage }),
     });
-    return response.json();
+    const jsonResponse = await response.json();
+
+    // New code: Save the AI response to local storage
+    const chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
+    chatHistory.push({ text: jsonResponse.output, sender: 'ai' }); // Assume jsonResponse.output contains the AI response text
+    localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+
+    return jsonResponse;
+}
+
+
+async function automateProcess() {
+    if (isAutomationPaused) return; // Exit if automation is paused
+
+    // Perform the actions as outlined, starting with finding all visible elements and sending the chat message
+    const elementsResult = findAllVisibleElements();
+    const elementsResultString = JSON.stringify(elementsResult);
+    const response = await sendChatMessage(originalMessageText, elementsResultString);
+    const action_element = JSON.parse(response.output);
+
+    // Process the response to determine the next action
+    await processChatbotResponse(action_element);
+
+    // Display AI's response in the chatbox
+    const aiMessage = document.createElement('div');
+    aiMessage.style.textAlign = 'left';
+    aiMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${response.output}</div>`; // Assuming response.output contains the AI response text
+    document.getElementById('chatbox-messages').appendChild(aiMessage);
+    document.getElementById('chatbox-messages').scrollTop = document.getElementById('chatbox-messages').scrollHeight;
+
+    // Check if there's an element to interact with and perform the interaction
+    const elementToInteract = action_element.the_element_interaction[0].element_of_this_step;
+    if (elementToInteract) {
+        findAllElementsWithText(elementToInteract);
+    }
+
+    // Display the reason for the chatbot's decision (if needed, it seems you're already doing something similar)
+    // You can adjust or remove this part depending on how you want to handle the display of AI reasoning
+
+    // Clear the input box after processing
+    document.getElementById('chatbox-input').value = '';
+
+    // Continue the process after a short delay to allow for UI updates and response handling
+    setTimeout(() => {
+        if (!isAutomationPaused) automateProcess();
+    }, 5000); // Adjust the delay as needed
 }
 
 
@@ -148,10 +191,9 @@ function highlightElement(uniqueId, inputText) {
   }
 
 
-  
-  async function processChatbotResponse(response) {
+let uniqueIdCounter = 0;
+async function processChatbotResponse(response) {
     const theElementInteraction = response.the_element_interaction[0];
-    let uniqueIdCounter = 0; // You might want to manage this counter globally or in a different way
 
     let elementToInteract;
     if (theElementInteraction.id) {
@@ -174,7 +216,6 @@ function highlightElement(uniqueId, inputText) {
         }
     }
 }
-
 
 
 
@@ -217,36 +258,24 @@ function createChatBox() {
 
     chatboxInput.addEventListener('keypress', async function(e) {
         if (e.key === 'Enter' && chatboxInput.value.trim() !== '') {
+            // Display the user's message in the chatbox
             const userMessage = document.createElement('div');
             userMessage.style.textAlign = 'right';
             userMessage.innerHTML = `<div style="display: inline-block; background-color: #007bff; color: #ffffff; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${chatboxInput.value}</div>`;
             chatboxMessages.appendChild(userMessage);
             chatboxMessages.scrollTop = chatboxMessages.scrollHeight;
 
-            // Save user message to localStorage
+            // Save the user's message to localStorage
             const newChatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
             newChatHistory.push({ text: chatboxInput.value, sender: 'user' });
             localStorage.setItem('chatHistory', JSON.stringify(newChatHistory));
 
-            const response = await sendChatMessage(chatboxInput.value);
-            const output_response = response.output;
+            // Set the original message text for the automation process
+            originalMessageText = chatboxInput.value;
+            chatboxInput.value = ''; // Clear the input box after processing
 
-            const action_element = JSON.parse(output_response);
-            processChatbotResponse(action_element)
-            const elementToInteract = action_element.the_element_interaction[0].element_of_this_step;
-            if (elementToInteract !== '') {
-                findAllElementsWithText(elementToInteract);
-            }
-
-            const responseMessage = document.createElement('div');
-            responseMessage.style.textAlign = 'left';
-            responseMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${action_element.the_element_interaction[0].reason}</div>`;
-
-            chatboxMessages.appendChild(responseMessage);
-            chatboxMessages.scrollTop = chatboxMessages.scrollHeight;
-
-            chatboxInput.value = '';
-
+            // Start or continue the automation process with the new user input
+            await automateProcess();
         }
     });
 
@@ -270,12 +299,11 @@ function createChatBox() {
     pauseContinueBtn.innerText = 'Pause';
     pauseContinueBtn.style = 'flex: 1; padding: 10px; border: none; background-color: #FF0044; color: white; border-bottom-right-radius: 8px; cursor: pointer;';
     pauseContinueBtn.addEventListener('click', function() {
-        const chatboxInput = document.getElementById('chatbox-input'); // Ensure this ID is set for the chatbox input element
         if (pauseContinueBtn.innerText === 'Pause') {
-            chatboxInput.disabled = true; // Disable input
+            isAutomationPaused = true;
             pauseContinueBtn.innerText = 'Continue';
         } else {
-            chatboxInput.disabled = false; // Enable input
+            isAutomationPaused = false;
             pauseContinueBtn.innerText = 'Pause';
         }
     });
