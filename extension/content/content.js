@@ -66,7 +66,9 @@ async function sendChatMessage(messageText, elementsResultString) {
     // Trigger allElementsButton functionality before sending the chat message
     // const elementsResult = findAllVisibleElements(); // Get all visible elements
     // const elementsResultString = JSON.stringify(elementsResult); // Convert elements result to string for appending
-    const instruction = `You are a UI navigator. Given a {task} and the current {webpage_elements}, your job is to provide the one element that needs to be interacted with. Analyze the task and webpage elements carefully. If the interaction involves an input field, specify the text to be entered; otherwise, leave the ‘input_text’ field empty. 
+    const instruction = `You are a UI navigator. Given a {task} and the current {webpage_elements}, your job is to provide the one element that needs to be interacted with to continue the task. 
+Analyze the task and webpage elements carefully, the {webpage_element} could be for any step of the workflow, you need to decide which element to interact to further the task. 
+If the interaction involves an input field, specify the text to be entered; otherwise, leave the ‘input_text’ field empty. And And chatbox-related elements are not belongs to the webpage.
 Respond in the following JSON format:
 \`\`\`{{"the_element_interaction": [
     {{"element_of_this_step": "element_name", "id": "element_id", "type": "element_type", "correct_webpage": "yes_or_no", "input_text": "text_if_needed", "reason": "explanation_of_choice"}}
@@ -85,10 +87,12 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
     });
     const jsonResponse = await response.json();
 
-    // New code: Save the AI response to local storage
+    // Instead of using localStorage, send a message to the background script
     const chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
     chatHistory.push({ text: jsonResponse.output, sender: 'ai' }); // Assume jsonResponse.output contains the AI response text
-    localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+    chrome.runtime.sendMessage({action: "saveChatHistory", chatHistory: chatHistory}, function(response) {
+        console.log("Chat history saved:", response.status);
+    });
 
     return jsonResponse;
 }
@@ -104,7 +108,10 @@ async function automateProcess() {
     const action_element = JSON.parse(response.output);
 
     // Process the response to determine the next action
-    await processChatbotResponse(action_element);
+    setTimeout(() => {
+        if (!isAutomationPaused) processChatbotResponse(action_element);;
+    }, 6000); // Adjust the delay as needed
+    
 
     // Display AI's response in the chatbox
     const aiMessage = document.createElement('div');
@@ -114,21 +121,16 @@ async function automateProcess() {
     document.getElementById('chatbox-messages').scrollTop = document.getElementById('chatbox-messages').scrollHeight;
 
     // Check if there's an element to interact with and perform the interaction
-    const elementToInteract = action_element.the_element_interaction[0].element_of_this_step;
-    if (elementToInteract) {
-        findAllElementsWithText(elementToInteract);
+    if (action_element.the_element_interaction[0].element_of_this_step) {
+        findAllElementsWithText(action_element.the_element_interaction[0].element_of_this_step);
     }
 
-    // Display the reason for the chatbot's decision (if needed, it seems you're already doing something similar)
-    // You can adjust or remove this part depending on how you want to handle the display of AI reasoning
-
-    // Clear the input box after processing
-    document.getElementById('chatbox-input').value = '';
-
-    // Continue the process after a short delay to allow for UI updates and response handling
+    // document.getElementById('chatbox-input').value = '';
+    
+    // Process the response to determine the next action
     setTimeout(() => {
-        if (!isAutomationPaused) automateProcess();
-    }, 5000); // Adjust the delay as needed
+        if (!isAutomationPaused) processChatbotResponse(action_element);;
+    }, 6000); // Adjust the delay as needed
 }
 
 
@@ -246,15 +248,16 @@ function createChatBox() {
     chatboxInputContainer.appendChild(chatboxInput);
     chatboxContainer.appendChild(chatboxInputContainer);
 
-    // Load and display chat history
-    const chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
-    chatHistory.forEach(msg => {
-        const messageDiv = document.createElement('div');
-        messageDiv.style.textAlign = msg.sender === 'user' ? 'right' : 'left';
-        messageDiv.innerHTML = `<div style="display: inline-block; background-color: ${msg.sender === 'user' ? '#007bff' : '#f1f1f1'}; color: ${msg.sender === 'user' ? '#ffffff' : '#333'}; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${msg.text}</div>`;
-        chatboxMessages.appendChild(messageDiv);
+    // Request the chat history from the background script instead of accessing localStorage directly
+    chrome.runtime.sendMessage({action: "getChatHistory"}, function(response) {
+        const chatHistory = response || [];
+        chatHistory.forEach(msg => {
+            const messageDiv = document.createElement('div');
+            messageDiv.style.textAlign = msg.sender === 'user' ? 'right' : 'left';
+            messageDiv.innerHTML = `<div style="display: inline-block; background-color: ${msg.sender === 'user' ? '#007bff' : '#f1f1f1'}; color: ${msg.sender === 'user' ? '#ffffff' : '#333'}; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${msg.text}</div>`;
+            chatboxMessages.appendChild(messageDiv);
+        });
     });
-
 
     chatboxInput.addEventListener('keypress', async function(e) {
         if (e.key === 'Enter' && chatboxInput.value.trim() !== '') {
@@ -266,9 +269,9 @@ function createChatBox() {
             chatboxMessages.scrollTop = chatboxMessages.scrollHeight;
 
             // Save the user's message to localStorage
-            const newChatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
-            newChatHistory.push({ text: chatboxInput.value, sender: 'user' });
-            localStorage.setItem('chatHistory', JSON.stringify(newChatHistory));
+            chrome.runtime.sendMessage({action: "updateChatHistory", text: chatboxInput.value, sender: 'user'}, function(response) {
+                console.log("Chat history updated:", response.status);
+            });
 
             // Set the original message text for the automation process
             originalMessageText = chatboxInput.value;
@@ -288,10 +291,13 @@ function createChatBox() {
     restartBtn.innerText = 'Restart';
     restartBtn.style = 'flex: 1; padding: 10px; border: none; background-color: #0056b3; color: white; border-bottom-left-radius: 8px; cursor: pointer;';
     restartBtn.addEventListener('click', function() {
-        localStorage.removeItem('chatHistory');
-        while (chatboxMessages.firstChild) {
-            chatboxMessages.removeChild(chatboxMessages.firstChild);
-        }
+        // Send a message to the background script to clear the chat history
+        chrome.runtime.sendMessage({action: "clearChatHistory"}, function(response) {
+            console.log("Chat history cleared:", response.status);
+            while (chatboxMessages.firstChild) {
+                chatboxMessages.removeChild(chatboxMessages.firstChild);
+            }
+        });
     });
 
     // Pause/Continue Button
