@@ -66,10 +66,10 @@ async function sendChatMessage(messageText, elementsResultString) {
     // Trigger allElementsButton functionality before sending the chat message
     // const elementsResult = findAllVisibleElements(); // Get all visible elements
     // const elementsResultString = JSON.stringify(elementsResult); // Convert elements result to string for appending
-    const instruction = `You are a UI navigator. Given a {task} and the current {webpage_elements}, your job is to provide the one element that needs to be interacted with to continue the task. 
+    const instruction = `You are a user interface navigator that output JSON format. Given a {task} and the current {webpage_elements}, your job as the user interface navigator is to provide the one element that needs to be interacted with to continue the task. 
 Analyze the task and webpage elements carefully, the {webpage_element} could be for any step of the workflow, you need to decide which element to interact to further the task. 
-If the interaction involves an input field, specify the text to be entered; otherwise, leave the ‘input_text’ field empty. And And chatbox-related elements are not belongs to the webpage.
-Respond in the following JSON format:
+If the interaction involves an input field, specify the text to be entered; otherwise, leave the ‘input_text’ field empty.
+You must respond in the following JSON format:
 \`\`\`{{"the_element_interaction": [
     {{"element_of_this_step": "element_name", "id": "element_id", "type": "element_type", "correct_webpage": "yes_or_no", "input_text": "text_if_needed", "reason": "explanation_of_choice"}}
 ]}}\`\`\`
@@ -101,68 +101,38 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
 async function automateProcess() {
     if (isAutomationPaused) return; // Exit if automation is paused
 
-    // Perform the actions as outlined, starting with finding all visible elements and sending the chat message
-    const elementsResult = findAllVisibleElements();
-    const elementsResultString = JSON.stringify(elementsResult);
-    const response = await sendChatMessage(originalMessageText, elementsResultString);
-    const action_element = JSON.parse(response.output);
+    try {
+        const elementsResult = findAllVisibleElements();
+        const elementsResultString = JSON.stringify(elementsResult);
+        const response = await sendChatMessage(originalMessageText, elementsResultString);
+        const action_element = JSON.parse(response.output);
+        
+        // processChatbotResponse(action_element)
 
-    // Process the response to determine the next action
-    setTimeout(() => {
-        if (!isAutomationPaused) processChatbotResponse(action_element);;
-    }, 6000); // Adjust the delay as needed
     
+        // Display AI's response in the chatbox
+        const aiMessage = document.createElement('div');
+        aiMessage.style.textAlign = 'left';
+        aiMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${response.output}</div>`; // Assuming response.output contains the AI response text
+        document.getElementById('chatbox-messages').appendChild(aiMessage);
+        document.getElementById('chatbox-messages').scrollTop = document.getElementById('chatbox-messages').scrollHeight;
 
-    // Display AI's response in the chatbox
-    const aiMessage = document.createElement('div');
-    aiMessage.style.textAlign = 'left';
-    aiMessage.innerHTML = `<div style="display: inline-block; background-color: #f1f1f1; color: #333; padding: 5px 10px; border-radius: 4px; margin-top: 5px;">${response.output}</div>`; // Assuming response.output contains the AI response text
-    document.getElementById('chatbox-messages').appendChild(aiMessage);
-    document.getElementById('chatbox-messages').scrollTop = document.getElementById('chatbox-messages').scrollHeight;
+        // Step 4: Check if there's an element to interact with and perform the interaction
+        if (action_element.the_element_interaction[0].element_of_this_step) {
+            findAllElementsWithText(action_element.the_element_interaction[0].element_of_this_step);
+        }
 
-    // Check if there's an element to interact with and perform the interaction
-    if (action_element.the_element_interaction[0].element_of_this_step) {
-        findAllElementsWithText(action_element.the_element_interaction[0].element_of_this_step);
+        // Step 5: Schedule the next invocation of automateProcess
+        setTimeout(() => {
+            if (!isAutomationPaused) automateProcess(); // Recursively call to continue the process if not paused
+        }, 1000); // Adjust the delay as needed, considering the time needed for user to read the AI response and any animations or page updates to complete
+    } catch (error) {
+        console.error("Error during automation process:", error);
+        // Handle the error or retry logic here
+        // You might choose to log this error, display a message to the user, or attempt to retry the operation
     }
-
-    // document.getElementById('chatbox-input').value = '';
-    
-    // Process the response to determine the next action
-    setTimeout(() => {
-        if (!isAutomationPaused) processChatbotResponse(action_element);;
-    }, 6000); // Adjust the delay as needed
 }
 
-
-function highlightElement(uniqueId, inputText) {
-    const element = document.querySelector(`[data-highlight-id='${uniqueId}']`);
-    if (element) {
-        // can use id to find and click on elements instead of text matching
-
-      // Check if the element is an input and part of a form
-      if (element.tagName.toLowerCase() === 'input') {
-        element.value = inputText; // Set the input text
-  
-        // Find the parent form of the input element, if any
-        let parentForm = element.closest('form');
-        if (parentForm) {
-          // Submit the form programmatically
-          parentForm.submit();
-        } else {
-          // Simulate the Enter key press for inputs not within a form
-          const event = new KeyboardEvent('keypress', {
-            key: 'Enter',
-            code: 'Enter',
-            which: 13,
-            keyCode: 13,
-            bubbles: true,
-            cancelable: true
-          });
-          element.dispatchEvent(event);
-        }
-      }
-    }
-  }
   
 
   function findAllElementsWithText(textToFind) {
@@ -193,8 +163,8 @@ function highlightElement(uniqueId, inputText) {
   }
 
 
-let uniqueIdCounter = 0;
 async function processChatbotResponse(response) {
+    let uniqueIdCounter = 0;
     const theElementInteraction = response.the_element_interaction[0];
 
     let elementToInteract;
@@ -210,8 +180,7 @@ async function processChatbotResponse(response) {
         elementToInteract.setAttribute('data-highlight-id', uniqueId);
 
         if (theElementInteraction.type === 'input' && theElementInteraction.input_text) {
-            // Call highlightElement with the uniqueId and the input text
-            highlightElement(uniqueId, theElementInteraction.input_text);
+            enterText(uniqueId, theElementInteraction.input_text);
         } else {
             // Just highlight the element
             elementToInteract.style.border = '2px solid red';
@@ -219,7 +188,35 @@ async function processChatbotResponse(response) {
     }
 }
 
+function enterText(uniqueId, inputText) {
+    const element = document.querySelector(`[data-highlight-id='${uniqueId}']`);
+    if (element) {
+        // can use id to find and click on elements instead of text matching
 
+      // Check if the element is an input and part of a form
+      if (element.tagName.toLowerCase() === 'input') {
+        element.value = inputText; // Set the input text
+  
+        // Find the parent form of the input element, if any
+        let parentForm = element.closest('form');
+        if (parentForm) {
+          // Submit the form programmatically
+          parentForm.submit();
+        } else {
+          // Simulate the Enter key press for inputs not within a form
+          const event = new KeyboardEvent('keypress', {
+            key: 'Enter',
+            code: 'Enter',
+            which: 13,
+            keyCode: 13,
+            bubbles: true,
+            cancelable: true
+          });
+          element.dispatchEvent(event);
+        }
+      }
+    }
+  }
 
 
 function createChatBox() {

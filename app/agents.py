@@ -10,13 +10,13 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 def initialize_chat_agent():
     llm = ChatOpenAI(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
-        temperature=0.3,
+        temperature=0,
         model_name="gpt-4-0125-preview",
         streaming=False
     )
     memory = ConversationBufferWindowMemory(
         memory_key="chat_history",
-        k=25,
+        k=0,
         return_messages=True,
         output_key="output"
     )
@@ -25,7 +25,7 @@ def initialize_chat_agent():
         tools=[],
         llm=llm,
         verbose=True,
-        max_iterations=3,
+        max_iterations=10,
         early_stopping_method="generate",
         memory=memory,
         return_intermediate_steps=False
