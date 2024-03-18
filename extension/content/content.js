@@ -97,9 +97,27 @@ Ensure the response is valid JSON in the action_input. You must respond in such 
     return jsonResponse;
 }
 
-
+let currentAutomationURL = window.location.href;
 async function automateProcess() {
-    if (isAutomationPaused) return; // Exit if automation is paused
+    if (isAutomationPaused || currentAutomationURL !== window.location.href) {
+        // Exit if automation is paused or if the page URL has changed
+        console.log("Automation stopped due to pause or page navigation.");
+        return;
+    }
+
+    // Function to wait for the document to be fully loaded
+    function waitForPageLoad() {
+        return new Promise((resolve) => {
+            if (document.readyState === 'complete') {
+                resolve();
+            } else {
+                window.addEventListener('load', resolve, { once: true });
+            }
+        });
+    }
+
+    // Wait for the page to load before proceeding
+    await waitForPageLoad();
 
     try {
         const elementsResult = findAllVisibleElements();
@@ -107,7 +125,7 @@ async function automateProcess() {
         const response = await sendChatMessage(originalMessageText, elementsResultString);
         const action_element = JSON.parse(response.output);
         
-        // processChatbotResponse(action_element)
+        processChatbotResponse(action_element)
 
     
         // Display AI's response in the chatbox
@@ -125,13 +143,24 @@ async function automateProcess() {
         // Step 5: Schedule the next invocation of automateProcess
         setTimeout(() => {
             if (!isAutomationPaused) automateProcess(); // Recursively call to continue the process if not paused
-        }, 1000); // Adjust the delay as needed, considering the time needed for user to read the AI response and any animations or page updates to complete
+        }, 3000); // Adjust the delay as needed, considering the time needed for user to read the AI response and any animations or page updates to complete
     } catch (error) {
         console.error("Error during automation process:", error);
         // Handle the error or retry logic here
         // You might choose to log this error, display a message to the user, or attempt to retry the operation
     }
 }
+
+
+function setupPageLoadListener() {
+    window.addEventListener('load', () => {
+        // Optionally, check if the URL has changed or if other conditions are met before restarting automation
+        automateProcess();
+    });
+}
+
+// Initialize the listener when the script loads
+setupPageLoadListener();
 
   
 
@@ -217,6 +246,31 @@ function enterText(uniqueId, inputText) {
       }
     }
   }
+
+/*
+// Messaging with the background for dynamic operations
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+    if (request.action === "scanPage") {
+        const elementsResult = findAllVisibleElements();
+        sendResponse({status: "success", data: elementsResult});
+    }
+    if (request.action === "clearChatHistory") {
+        // Assume a function clearChatHistoryUI() that clears the chat UI
+        clearChatHistoryUI();
+        sendResponse({status: "Chat history cleared"});
+    }
+    return true; // Support asynchronous response
+});
+
+function clearChatHistoryUI() {
+    const chatboxMessages = document.getElementById('chatbox-messages');
+    while (chatboxMessages.firstChild) {
+        chatboxMessages.removeChild(chatboxMessages.firstChild);
+    }
+    // If you're maintaining a local variable for chat history, reset it as well
+    chatHistory = []; // Assuming there's a local chatHistory variable
+}
+*/
 
 
 function createChatBox() {
@@ -323,4 +377,4 @@ function createChatBox() {
 }
 
 // Call createChatBox to display the chatbox when the extension is loaded
-createChatBox();
+// createChatBox();

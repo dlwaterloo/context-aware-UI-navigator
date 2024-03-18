@@ -16,7 +16,7 @@ def initialize_chat_agent():
     )
     memory = ConversationBufferWindowMemory(
         memory_key="chat_history",
-        k=0,
+        k=1,
         return_messages=True,
         output_key="output"
     )
