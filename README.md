@@ -139,6 +139,4 @@ The extension implements a sophisticated element detection system that:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## License
 
-[Add your chosen license here]
